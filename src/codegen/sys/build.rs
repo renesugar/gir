@@ -26,14 +26,24 @@ fn generate_build_script(w: &mut dyn Write, env: &Env) -> Result<()> {
     write!(
         w,
         "{}",
-        r##"extern crate pkg_config;
+        r##"#[cfg(not(feature = "dox"))]
+extern crate pkg_config;
 
+#[cfg(not(feature = "dox"))]
 use pkg_config::{Config, Error};
+#[cfg(not(feature = "dox"))]
 use std::env;
+#[cfg(not(feature = "dox"))]
 use std::io::prelude::*;
+#[cfg(not(feature = "dox"))]
 use std::io;
+#[cfg(not(feature = "dox"))]
 use std::process;
 
+#[cfg(feature = "dox")]
+fn main() {} // prevent linking libraries to avoid documentation failure
+
+#[cfg(not(feature = "dox"))]
 fn main() {
     if let Err(s) = find() {
         let _ = writeln!(io::stderr(), "{}", s);
@@ -41,6 +51,7 @@ fn main() {
     }
 }
 
+#[cfg(not(feature = "dox"))]
 fn find() -> Result<(), Error> {
 "##
     )?;

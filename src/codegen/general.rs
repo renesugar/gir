@@ -44,22 +44,16 @@ from gir-files (https://github.com/gtk-rs/gir-files @ {})",
 
 pub fn uses(w: &mut dyn Write, env: &Env, imports: &Imports) -> Result<()> {
     writeln!(w)?;
-    for (name, &(ref version, ref constraints)) in imports.iter() {
-        if constraints.len() == 1 {
-            writeln!(w, "#[cfg(feature = \"{}\")]", constraints[0])?;
-        } else if !constraints.is_empty() {
+    for (name, ref scope) in imports.iter() {
+        if !scope.constraints.is_empty() {
             writeln!(
                 w,
-                "#[cfg(any({}))]",
-                constraints
-                    .iter()
-                    .map(|c| format!("feature = \"{}\"", c))
-                    .collect::<Vec<_>>()
-                    .join(", ")
+                "#[cfg(any({},feature = \"dox\"))]",
+                scope.constraints.join(", ")
             )?;
         }
 
-        version_condition(w, env, *version, false, 0)?;
+        version_condition(w, env, scope.version, false, 0)?;
         writeln!(w, "use {};", name)?;
     }
 
@@ -520,16 +514,13 @@ pub fn declare_default_from_new(
 /// Escapes string in format suitable for placing inside double quotes.
 pub fn escape_string(s: &str) -> String {
     let mut es = String::with_capacity(s.len() * 2);
-    let _ = s
-        .chars()
-        .map(|c| match c {
-            '\"' | '\\' => {
-                es.push('\\');
-                es.push(c)
-            }
-            _ => es.push(c),
-        })
-        .count();
+    for c in s.chars() {
+        match c {
+            '\"' | '\\' => es.push('\\'),
+            _ => (),
+        }
+        es.push(c)
+    }
     es
 }
 

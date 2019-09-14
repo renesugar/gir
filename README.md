@@ -188,6 +188,8 @@ generate_builder = true
     # write function docs to trait other than default "xxxExt",
     # also works in [object.signal] and [object.property]
     doc_trait_name = "SocketListenerExtManual"
+    # disable generation of future for async function
+    no_future = true
         # override for parameter
         [[object.function.parameter]]
         # filter by name
@@ -486,3 +488,7 @@ It also replaces FFI crates' name.
 [crate_name_overrides]
 "web_kit2_web_extension" = "webkit2_webextension"
 ```
+
+## GIR format reference
+
+It can always be useful to look at the [reference](https://gi.readthedocs.io/en/latest/annotations/giannotations.html) or [schema](https://gitlab.gnome.org/GNOME/gobject-introspection/blob/master/docs/gir-1.2.rnc), right?

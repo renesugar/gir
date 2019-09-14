@@ -102,13 +102,12 @@ pub fn generate(
         )?;
 
         if !only_declaration {
-            let trampoline = match analysis.trampoline.as_ref() {
-                Ok(trampoline) => trampoline,
-                Err(_) => panic!(
+            let trampoline = analysis.trampoline.as_ref().unwrap_or_else(|_| {
+                panic!(
                     "Internal error: can't find trampoline for signal '{}'",
                     analysis.signal_name,
-                ),
-            };
+                )
+            });
             let mut args = String::with_capacity(100);
 
             for (pos, par) in trampoline.parameters.rust_parameters.iter().enumerate() {
@@ -138,11 +137,19 @@ pub fn generate(
             )?;
 
             if trampoline.ret.typ != Default::default() {
-                if trampoline.ret.nullable == library::Nullable(true) {
-                    writeln!(w, "{}res.unwrap().get()", tabs(indent + 1),)?;
+                let unwrap = if trampoline.ret.nullable == library::Nullable(true) {
+                    ""
                 } else {
-                    writeln!(w, "{}res.unwrap().get().unwrap()", tabs(indent + 1),)?;
-                }
+                    ".unwrap()"
+                };
+
+                writeln!(
+                    w,
+                    "{}res.unwrap().get().expect(\"Return Value for `{}`\"){}",
+                    tabs(indent + 1),
+                    emit_name,
+                    unwrap,
+                )?;
             }
             writeln!(w, "{}}}", tabs(indent))?;
         }
@@ -160,13 +167,12 @@ fn function_type_string(
         return None;
     }
 
-    let trampoline = match analysis.trampoline.as_ref() {
-        Ok(trampoline) => trampoline,
-        Err(_) => panic!(
+    let trampoline = analysis.trampoline.as_ref().unwrap_or_else(|_| {
+        panic!(
             "Internal error: can't find trampoline for signal '{}'",
             analysis.signal_name
-        ),
-    };
+        )
+    });
 
     let type_ = func_string(
         env,
