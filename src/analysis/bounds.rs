@@ -90,6 +90,7 @@ impl Bounds {
         let mut callback_info = None;
         let mut ret = None;
         let mut need_is_into_check = false;
+
         if !par.instance_parameter && par.direction != ParameterDirection::Out {
             if let Some(bound_type) = Bounds::type_for(env, par.typ, par.nullable) {
                 ret = Some(Bounds::get_to_glib_extra(&bound_type));
@@ -170,6 +171,7 @@ impl Bounds {
             _ => None,
         }
     }
+
     fn get_to_glib_extra(bound_type: &BoundType) -> String {
         use self::BoundType::*;
         match *bound_type {
@@ -178,6 +180,7 @@ impl Bounds {
             _ => String::new(),
         }
     }
+
     pub fn add_parameter(
         &mut self,
         name: &str,
@@ -202,7 +205,6 @@ impl Bounds {
         if self.used.iter().any(|n| n.parameter_name == name) {
             return false;
         }
-        let type_str = type_str.to_owned();
         if let Some(alias) = self.unused.pop_front() {
             self.used.push(Bound {
                 bound_type,
@@ -217,6 +219,7 @@ impl Bounds {
             false
         }
     }
+
     pub fn get_parameter_alias_info(&self, name: &str) -> Option<(char, BoundType)> {
         self.used
             .iter()
@@ -229,6 +232,7 @@ impl Bounds {
             })
             .map(|t| (t.alias, t.bound_type.clone()))
     }
+
     pub fn get_base_alias(&self, alias: char) -> Option<char> {
         if alias == TYPE_PARAMETERS_START {
             return None;
@@ -245,6 +249,7 @@ impl Bounds {
                 }
             })
     }
+
     pub fn update_imports(&self, imports: &mut Imports) {
         //TODO: import with versions
         use self::BoundType::*;
@@ -256,12 +261,15 @@ impl Bounds {
             }
         }
     }
+
     pub fn is_empty(&self) -> bool {
         self.used.is_empty()
     }
+
     pub fn iter(&self) -> Iter<'_, Bound> {
         self.used.iter()
     }
+
     pub fn iter_lifetimes(&self) -> Iter<'_, char> {
         self.lifetimes.iter()
     }
@@ -315,8 +323,8 @@ fn find_error_type(env: &Env, function: &Function) -> String {
         .iter()
         .find(|param| param.direction == ParameterDirection::Out && param.name == "error")
         .expect("error type");
-    if let Type::Record(ref record) = *env.type_(error_param.typ) {
-        return record.name.clone();
+    if let Type::Record(_) = *env.type_(error_param.typ) {
+        return rust_type(env, error_param.typ).into_string();
     }
     panic!("cannot find error type")
 }

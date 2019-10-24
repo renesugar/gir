@@ -1,5 +1,6 @@
 use super::conversion_type::ConversionType;
 use crate::{
+    analysis::namespaces,
     analysis::ref_mode::RefMode,
     env::Env,
     library::{self, Nullable, ParameterScope},
@@ -179,7 +180,7 @@ pub fn rust_type_full(
             }
         }
         Enumeration(..) | Bitfield(..) | Record(..) | Union(..) | Class(..) | Interface(..) => {
-            let name = type_.get_name().to_owned();
+            let name = type_.get_name();
             if env.type_status(&type_id.full_name(&env.library)).ignored() {
                 Err(TypeError::Ignored(name))
             } else {
@@ -238,10 +239,10 @@ pub fn rust_type_full(
                         Ok(format!("Vec<{}>", s))
                     }
                 } else {
-                    Err(TypeError::Unimplemented(type_.get_name().to_owned()))
+                    Err(TypeError::Unimplemented(type_.get_name()))
                 }
             } else {
-                Err(TypeError::Unimplemented(type_.get_name().to_owned()))
+                Err(TypeError::Unimplemented(type_.get_name()))
             }
         }
         Custom(library::Custom { ref name, .. }) => Ok(name.clone()),
@@ -258,7 +259,12 @@ pub fn rust_type_full(
 
             let full_name = type_id.full_name(&env.library);
             if full_name == "Gio.AsyncReadyCallback" {
-                return Ok("FnOnce(Result<(), Error>) + 'static".to_owned());
+                return Ok(if env.namespaces.glib_ns_id == namespaces::MAIN {
+                    "FnOnce(Result<(), Error>) + 'static"
+                } else {
+                    "FnOnce(Result<(), glib::Error>) + 'static"
+                }
+                .to_owned());
             } else if full_name == "GLib.DestroyNotify" {
                 return Ok(format!("Fn(){} + 'static", concurrency));
             }
@@ -349,12 +355,11 @@ pub fn rust_type_full(
                 format!("{}{}", ret, if scope.is_call() { "" } else { " + 'static" })
             })
         }
-        _ => Err(TypeError::Unimplemented(type_.get_name().to_owned())),
+        _ => Err(TypeError::Unimplemented(type_.get_name())),
     };
 
     if type_id.ns_id != library::MAIN_NAMESPACE
         && type_id.ns_id != library::INTERNAL_NAMESPACE
-        && !implemented_in_main_namespace(&env.library, type_id)
         && type_id.full_name(&env.library) != "GLib.DestroyNotify"
         && type_id.full_name(&env.library) != "GObject.Callback"
         && !type_.is_function()
@@ -487,7 +492,7 @@ pub fn parameter_rust_type(
         }
         Function(_) => rust_type,
         Custom(..) => rust_type.map_any(|s| format_parameter(s, direction)),
-        _ => Err(TypeError::Unimplemented(type_.get_name().to_owned())),
+        _ => Err(TypeError::Unimplemented(type_.get_name())),
     }
 }
 
@@ -498,9 +503,4 @@ fn format_parameter(rust_type: String, direction: library::ParameterDirection) -
     } else {
         rust_type
     }
-}
-
-//TODO: remove
-fn implemented_in_main_namespace(library: &library::Library, type_id: library::TypeId) -> bool {
-    type_id.full_name(library) == "GLib.Error"
 }

@@ -10,6 +10,7 @@ use crate::{
         bounds::{Bounds, CallbackInfo},
         function_parameters::{self, CParameter, Parameters, Transformation, TransformationType},
         imports::Imports,
+        is_gpointer,
         out_parameters::{self, use_function_return_for_result},
         ref_mode::RefMode,
         return_value,
@@ -224,6 +225,21 @@ fn fixup_special_functions(
     }
 }
 
+fn find_callback_bound_to_destructor(
+    callbacks: &[Trampoline],
+    destroy: &mut Trampoline,
+    destroy_index: usize,
+) -> bool {
+    for call in callbacks {
+        if call.destroy_index == destroy_index {
+            destroy.nullable = call.nullable;
+            destroy.bound_name = call.bound_name.clone();
+            return true;
+        }
+    }
+    false
+}
+
 fn analyze_callbacks(
     env: &Env,
     func: &library::Function,
@@ -262,6 +278,7 @@ fn analyze_callbacks(
             Some(n) => &n,
             None => &func.name,
         };
+        let mut destructors_to_update = Vec::new();
         for pos in 0..parameters.c_parameters.len() {
             // If it is a user data parameter, we ignore it.
             if cross_user_data_check.values().any(|p| *p == pos) || user_data_indexes.contains(&pos)
@@ -345,17 +362,15 @@ fn analyze_callbacks(
                         warn_main!(
                             type_tid,
                             "`{}`: no user data point to the destroy callback",
-                            func_name
+                            func_name,
                         );
                         *commented = true;
                     }
                     // We check if the user trampoline is there. If so, we change the destroy
                     // nullable value if needed.
-                    for call in callbacks.iter() {
-                        if call.destroy_index == pos {
-                            callback.nullable = call.nullable;
-                            break;
-                        }
+                    if !find_callback_bound_to_destructor(&callbacks, &mut callback, pos) {
+                        // Maybe the linked callback is after so we store it just in case...
+                        destructors_to_update.push((pos, destroys.len()));
                     }
                     destroys.push(callback);
                     to_remove.push(pos);
@@ -372,6 +387,19 @@ fn analyze_callbacks(
                     par.scope,
                 )
                 .is_err();
+            }
+        }
+        for (destroy_index, pos_in_destroys) in destructors_to_update {
+            if !find_callback_bound_to_destructor(
+                &callbacks,
+                &mut destroys[pos_in_destroys],
+                destroy_index,
+            ) {
+                warn_main!(
+                    type_tid,
+                    "`{}`: destructor without linked callback",
+                    func_name
+                );
             }
         }
     }
@@ -548,7 +576,7 @@ fn analyze_function(
         for (pos, par) in parameters.c_parameters.iter().enumerate() {
             // FIXME: It'd be better if we assumed that user data wasn't gpointer all the time so
             //        we could handle it more generically.
-            if r#async && par.c_type == "gpointer" {
+            if r#async && is_gpointer(&par.c_type) {
                 continue;
             }
             assert!(
@@ -557,7 +585,9 @@ fn analyze_function(
                 func.c_identifier.as_ref().unwrap()
             );
             if let Ok(s) = used_rust_type(env, par.typ, !par.direction.is_out()) {
-                used_types.push(s);
+                if !s.ends_with("GString") || par.c_type == "gchar***" {
+                    used_types.push(s);
+                }
             }
             let (to_glib_extra, callback_info) =
                 bounds.add_for_parameter(env, func, par, r#async, library::Concurrency::None);
@@ -691,15 +721,7 @@ fn analyze_function(
 
     if !commented {
         if !destroys.is_empty() || !callbacks.is_empty() {
-            if callbacks.iter().any(|c| c.scope.is_async() && *c.nullable) {
-                warn_main!(
-                    type_tid,
-                    "{}: gir cannot generate nullable async callback...",
-                    func.c_identifier.as_ref().unwrap_or(&func.name)
-                );
-                commented = true;
-            }
-            if !commented && callbacks.iter().any(|c| !c.scope.is_call()) {
+            if callbacks.iter().any(|c| !c.scope.is_call()) {
                 imports.add("std::boxed::Box as Box_");
             }
         }
@@ -882,7 +904,7 @@ fn analyze_callback(
                                user_data,
                                c_parameters.len());
                     return None;
-                } else if c_parameters[user_data].0.c_type != "gpointer" {
+                } else if !is_gpointer(&c_parameters[user_data].0.c_type) {
                     *commented = true;
                     warn_main!(
                         type_tid,
@@ -958,10 +980,8 @@ fn analyze_callback(
             }
         }
         if let Ok(s) = used_rust_type(env, func.ret.typ, false) {
-            if s != "GString" {
+            if !s.ends_with("GString") {
                 imports_to_add.push(s);
-            } else {
-                imports_to_add.push("String".to_owned());
             }
         }
         let user_data_index = par.user_data_index.unwrap_or_else(|| 0);

@@ -1,5 +1,6 @@
 use crate::{
     analysis::{
+        bounds::Bounds,
         imports::Imports,
         properties::{get_property_ref_modes, Property},
         rust_type::*,
@@ -9,6 +10,7 @@ use crate::{
     library,
     traits::*,
 };
+use std::collections::HashSet;
 
 pub fn analyze(
     env: &Env,
@@ -21,32 +23,45 @@ pub fn analyze(
         return Vec::new();
     }
 
-    let mut builder_properties = analyze_class(env, props, obj, imports);
+    let mut names = HashSet::<String>::new();
+    let mut builder_properties = analyze_properties(env, props, obj, imports, &mut names);
 
     for &super_tid in env.class_hierarchy.supertypes(type_tid) {
         let type_ = env.type_(super_tid);
 
-        let super_class: &library::Class = match type_.maybe_ref() {
-            Some(super_class) => super_class,
-            None => continue,
+        let super_properties = match type_ {
+            library::Type::Class(class) => &class.properties,
+            library::Type::Interface(iface) => &iface.properties,
+            _ => continue,
         };
+        let super_obj =
+            if let Some(super_obj) = env.config.objects.get(&super_tid.full_name(&env.library)) {
+                super_obj
+            } else {
+                continue;
+            };
 
-        let new_builder_properties = analyze_class(env, &super_class.properties, obj, imports);
+        let new_builder_properties =
+            analyze_properties(env, super_properties, super_obj, imports, &mut names);
         builder_properties.extend(new_builder_properties);
     }
 
     builder_properties
 }
 
-pub fn analyze_class(
+fn analyze_properties(
     env: &Env,
     props: &[library::Property],
     obj: &GObject,
     imports: &mut Imports,
+    names: &mut HashSet<String>,
 ) -> Vec<Property> {
     let mut builder_properties = Vec::new();
 
     for prop in props {
+        if names.contains(&prop.name) {
+            continue;
+        }
         let configured_properties = obj.properties.matched(&prop.name);
         if configured_properties.iter().any(|f| f.ignore) {
             continue;
@@ -58,6 +73,7 @@ pub fn analyze_class(
         let builder = analyze_property(env, prop, &configured_properties, imports);
         if let Some(builder) = builder {
             builder_properties.push(builder);
+            names.insert(prop.name.clone());
         }
     }
 
@@ -70,8 +86,6 @@ fn analyze_property(
     configured_properties: &[&config::properties::Property],
     imports: &mut Imports,
 ) -> Option<Property> {
-    let name = prop.name.clone();
-
     let prop_version = configured_properties
         .iter()
         .filter_map(|f| f.version)
@@ -83,16 +97,24 @@ fn analyze_property(
     if !for_builder {
         return None;
     }
-    if let Ok(ref s) = used_rust_type(env, prop.typ, false) {
+    imports.set_defaults(prop_version, &None);
+    let type_str = used_rust_type(env, prop.typ, false);
+    if let Ok(ref s) = type_str {
         if !s.contains("GString") {
-            imports.add_used_type_with_version(s, prop.version);
+            imports.add_used_type(s);
         }
     }
 
     let (get_out_ref_mode, set_in_ref_mode, nullable) = get_property_ref_modes(env, prop);
 
+    let mut bounds = Bounds::default();
+    if let Some(bound) = Bounds::type_for(env, prop.typ, nullable) {
+        imports.add("glib::object::IsA");
+        bounds.add_parameter(&prop.name, &type_str.into_string(), bound, false);
+    }
+
     Some(Property {
-        name: name.clone(),
+        name: prop.name.clone(),
         var_name: String::new(),
         typ: prop.typ,
         is_get: false,
@@ -101,6 +123,7 @@ fn analyze_property(
         get_out_ref_mode,
         set_in_ref_mode,
         set_bound: None,
+        bounds,
         version: prop_version,
         deprecated_version: prop.deprecated_version,
     })
